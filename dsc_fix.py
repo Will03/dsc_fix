@@ -8,6 +8,7 @@
     Python Version: 2.7
     IDA Version: 6.95
 '''
+VERSION=0.1
 
 try:
     import idc
@@ -727,34 +728,69 @@ def map_exports(exports, verbose=True):
             print "[+] making name: %s" % (export_name)
         make_name(addr, export_name)
 
+class DSCfixUIHOOK(idaapi.UI_Hooks):
+    def __init__(self):
+        super(DSCfixUIHOOK, self).__init__()
+        self._last_event = None
 
-def main():
-    if _IN_IDA:
-        # # get dyld_shared_cache path from IDA's openFile dialog
+    def preprocess_action(self, name):
+        self._last_event = name
+        return super(DSCfixUIHOOK, self).preprocess_action(name)
+
+    def postprocess_action(self):
         print "[+] Please choose the original dyld_shared_cache_arm64"
-        dsc_path = idc.AskFile(0, "*.*", "dyld shared cache file")
-    else:
-        dsc_path = sys.argv[1]
+        # dsc_path = idc.AskFile(0, "*.*", "dyld shared cache file")
+        dsc_path = "/System/Library/dyld/dyld_shared_cache_x86_64"
 
-    if not dsc_path or not os.path.exists(dsc_path):
-        raise RuntimeError("Couldn't find the dyld shared cache file..")
+        if not dsc_path or not os.path.exists(dsc_path):
+            raise RuntimeError("Couldn't find the dyld shared cache file..")
 
-    print "[+] about to parse %s.." % (dsc_path)
-    dsc_file = open(dsc_path, "rb")
-    adrfind = AddrFinder(dsc_file, cache_symbols=False)
-    map_shared_bridges(dsc_file, adrfind)
-    if _IN_IDA:
-        addresses = sorted(set(get_bad_addresses()))
-    else:
-        addresses = sorted(set(eval(open("addrs.txt", "rb").read())))
+        
+        print "[+] about to parse %s.." % (dsc_path)
+        dsc_file = open(dsc_path, "rb")
+        adrfind = AddrFinder(dsc_file, cache_symbols=False)
+        map_shared_bridges(dsc_file, adrfind)
+        if _IN_IDA:
+            addresses = sorted(set(get_bad_addresses()))
+        else:
+            addresses = sorted(set(eval(open("addrs.txt", "rb").read())))
 
-    segments, exports = get_segments_and_exports_for_addresses(addresses, adrfind)
-    # segments = join_neighbors(segments, threshold=0x1000)
-    if _IN_IDA:
-        map_segments(segments, dsc_file)
-        map_exports(exports)
-        idaapi.analyze_area(idc.MinEA(), idc.MaxEA())
+        segments, exports = get_segments_and_exports_for_addresses(addresses, adrfind)
+        # segments = join_neighbors(segments, threshold=0x1000)
+        if _IN_IDA:
+            map_segments(segments, dsc_file)
+            map_exports(exports)
+            idaapi.analyze_area(idc.MinEA(), idc.MaxEA())
+        
+        return super(DSCfixUIHOOK, self).postprocess_action()        # # get dyld_shared_cache path from IDA's openFile dialog
+        
 
 
-if __name__ == "__main__":
-    main()
+class dsc_plugin(idaapi.plugin_t):
+    wanted_name = "Dyld shared cache references fix"
+    comment = "Dyld shared cache references fix "
+    flags = idaapi.PLUGIN_FIX
+    help = "This is help"
+    wanted_hotkey = ""
+    dialog = None
+
+    def init(self):
+        print("[DYSCfix] {} by in0de loaded!".format(
+            VERSION
+        ))
+        self.ui_hooks = DSCfixUIHOOK()
+        self.ui_hooks.hook()
+        print('DSCfix :: Plugin Started')
+        return idaapi.PLUGIN_KEEP
+    def term(self):
+        self.ui_hooks.unhook()
+
+    def run(self, arg):
+        pass
+        
+
+# if __name__ == "__main__":
+#     main()
+
+def PLUGIN_ENTRY():
+    return dsc_plugin()
